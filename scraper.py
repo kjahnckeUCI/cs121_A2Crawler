@@ -12,14 +12,9 @@ def extract_next_links(url, resp):
         file.write(resp.raw_response.content)
         file.close()
         soup = BeautifulSoup(resp.raw_response.content, 'html.parser')
-        print(soup.getText())
-        urls = []
-        for link in soup.find_all('a', href=True):
-            href = link.get('href')
-            if href.startswith('http'):  # Check if it's an absolute URL
-                urls.append(href)
-            elif href.startswith('/'):  # Handle relative URLs
-                urls.append(url + href)
+        URLs = parse_URLs(url, soup)
+        print(URLs)
+
     # Implementation required.
     # url: the URL that was used to get the page
     # resp.url: the actual url of the page
@@ -30,6 +25,16 @@ def extract_next_links(url, resp):
     #         resp.raw_response.content: the content of the page!
     # Return a list with the hyperlinks (as strings) scrapped from resp.raw_response.content
     return list()
+
+def parse_URLs(url, soup):
+    urls = []
+    for link in soup.find_all('a', href=True):
+        href = link.get('href')
+        if href.startswith('http'):  # Check if it's an absolute URL
+            urls.append(href)
+        elif href.startswith('/'):  # Handle relative URLs
+            urls.append(url + href)
+    return urls
 
 def is_valid(url):
     # Decide whether to crawl this url or not. 
