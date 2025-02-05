@@ -1,11 +1,25 @@
 import re
 from urllib.parse import urlparse
+from bs4 import BeautifulSoup
 
 def scraper(url, resp):
     links = extract_next_links(url, resp)
     return [link for link in links if is_valid(link)]
 
 def extract_next_links(url, resp):
+    if is_valid(url):
+        file = open('testcontent.txt', 'wb')
+        file.write(resp.raw_response.content)
+        file.close()
+        soup = BeautifulSoup(resp.raw_response.content, 'html.parser')
+        print(soup.getText())
+        urls = []
+        for link in soup.find_all('a', href=True):
+            href = link.get('href')
+            if href.startswith('http'):  # Check if it's an absolute URL
+                urls.append(href)
+            elif href.startswith('/'):  # Handle relative URLs
+                urls.append(url + href)
     # Implementation required.
     # url: the URL that was used to get the page
     # resp.url: the actual url of the page
