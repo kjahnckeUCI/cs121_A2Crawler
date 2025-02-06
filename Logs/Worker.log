@@ -1,0 +1,16 @@
+2025-02-04 03:25:58,567 - Worker-0 - INFO - Downloaded https://www.stat.uci.edu, status <200>, using cache ('styx.ics.uci.edu', 9003).
+2025-02-04 03:25:59,087 - Worker-0 - INFO - Downloaded https://www.informatics.uci.edu, status <200>, using cache ('styx.ics.uci.edu', 9003).
+2025-02-04 03:25:59,606 - Worker-0 - INFO - Downloaded https://www.cs.uci.edu, status <200>, using cache ('styx.ics.uci.edu', 9003).
+2025-02-04 03:26:00,127 - Worker-0 - INFO - Downloaded https://www.ics.uci.edu, status <200>, using cache ('styx.ics.uci.edu', 9003).
+2025-02-04 03:26:00,636 - Worker-0 - INFO - Frontier is empty. Stopping Crawler.
+2025-02-04 03:28:04,329 - Worker-0 - INFO - Frontier is empty. Stopping Crawler.
+2025-02-04 03:29:58,882 - Worker-0 - INFO - Frontier is empty. Stopping Crawler.
+2025-02-04 03:31:35,189 - Worker-0 - INFO - Frontier is empty. Stopping Crawler.
+2025-02-04 03:39:41,193 - Worker-0 - INFO - Frontier is empty. Stopping Crawler.
+2025-02-04 03:39:45,082 - Worker-0 - INFO - Frontier is empty. Stopping Crawler.
+2025-02-04 03:43:57,594 - Worker-0 - INFO - Frontier is empty. Stopping Crawler.
+2025-02-04 03:55:43,880 - Worker-0 - INFO - Frontier is empty. Stopping Crawler.
+2025-02-06 00:52:33,470 - Worker-0 - INFO - Frontier is empty. Stopping Crawler.
+2025-02-06 00:52:44,118 - Worker-0 - INFO - Frontier is empty. Stopping Crawler.
+2025-02-06 01:03:45,726 - Worker-0 - INFO - Frontier is empty. Stopping Crawler.
+2025-02-06 01:03:56,884 - Worker-0 - INFO - Frontier is empty. Stopping Crawler.

@@ -21,10 +21,18 @@ def is_valid(url):
     # Decide whether to crawl this url or not. 
     # If you decide to crawl it, return True; otherwise return False.
     # There are already some conditions that return False.
+
+    VALID_DOMAINS = {".ics.uci.edu", ".cs.uci.edu", ".informatics.uci.edu", ".stat.uci.edu"}
+
     try:
         parsed = urlparse(url)
+        # Check if scheme is https or http
         if parsed.scheme not in set(["http", "https"]):
             return False
+        # Check if URL is one of VALID_DOMAINS
+        if not any(parsed.netloc.endswith(domain) for domain in VALID_DOMAINS):
+            return False
+        # Get rid of unwanted file types
         return not re.match(
             r".*\.(css|js|bmp|gif|jpe?g|ico"
             + r"|png|tiff?|mid|mp2|mp3|mp4"
