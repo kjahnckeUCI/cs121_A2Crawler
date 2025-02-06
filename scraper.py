@@ -3,9 +3,12 @@ import tokenizer as t
 from urllib.parse import urlparse
 from bs4 import BeautifulSoup
 
-
+# tuple of possible domains we're allowed to crawl
 VALID_DOMAINS = ("ics.uci.edu", "cs.uci.edu", "informatics.uci.edu", "stat.uci.edu")
+
+# set of all unqiue URLs identified, might need to change to a dictionary to get urls from each page
 TOTAL_URLS = set()
+
 
 def scraper(url, resp):
     links = extract_next_links(url, resp)
@@ -13,34 +16,29 @@ def scraper(url, resp):
 
 
 def extract_next_links(url, resp):
-    # Implementation required.
-    # url: the URL that was used to get the page
-    # resp.url: the actual url of the page
-    # resp.status: the status code returned by the server. 200 is OK, you got the page. Other numbers mean that there was some kind of problem.
-    # resp.error: when status is not 200, you can check the error here, if needed.
+    # Implementation required. url: the URL that was used to get the page resp.url: the actual url of the page
+    # resp.status: the status code returned by the server. 200 is OK, you got the page. Other numbers mean that there
+    # was some kind of problem. resp.error: when status is not 200, you can check the error here, if needed.
     # resp.raw_response: this is where the page actually is. More specifically, the raw_response has two parts:
-    #         resp.raw_response.url: the url, again
-    #         resp.raw_response.content: the content of the page!
-    # Return a list with the hyperlinks (as strings) scrapped from resp.raw_response.content
+    # resp.raw_response.url: the url, again resp.raw_response.content: the content of the page! Return a list with
+    # the hyperlinks (as strings) scrapped from resp.raw_response.content
 
-    if is_valid(url):
+    if is_valid(url) and not resp.error:  # make sure the URL is valid and is not responding with error
         soup = BeautifulSoup(resp.raw_response.content, 'html.parser')
         urls = parse_urls(url, soup)
         # file = open('testcontent.txt', 'w')
         # file.write(soup.getText())
         # file.close()
-        #
         # tokens = t.tokenize('testcontent.txt')
         # frequencies = t.compute_word_frequencies(tokens)
         # t.print_frequencies(frequencies)
 
-        valid_urls = get_valid_urls(urls)
+        valid_urls = get_valid_urls(urls) #move this up so it doesn't crawl
         print(valid_urls)
-        #invalid_urls = set(urls)-set(valid_urls)
-        #print(invalid_urls)
         return valid_urls
 
     return list()
+
 
 def get_valid_urls(urls):
     # checks if urls are valid
@@ -52,6 +50,7 @@ def get_valid_urls(urls):
 
     return valid_urls
 
+
 def _is_valid_authority(url):
     # checks if url authority matches one of the allowed authorities
     parsed = urlparse(url)
@@ -61,6 +60,7 @@ def _is_valid_authority(url):
     pattern = r"(" + r"|".join(re.escape(n) for n in VALID_DOMAINS) + r")$"
 
     return re.search(pattern, netloc) is not None
+
 
 def parse_urls(url, soup):
 
@@ -72,6 +72,7 @@ def parse_urls(url, soup):
         elif href.startswith('/'):  # Handle relative URLs
             urls.append(url + href)
     return urls
+
 
 def is_valid(url):
     # Decide whether to crawl this url or not.
