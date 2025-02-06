@@ -5,7 +5,7 @@ from bs4 import BeautifulSoup
 
 
 VALID_DOMAINS = ("ics.uci.edu", "cs.uci.edu", "informatics.uci.edu", "stat.uci.edu")
-
+TOTAL_URLS = set()
 
 def scraper(url, resp):
     links = extract_next_links(url, resp)
@@ -26,19 +26,19 @@ def extract_next_links(url, resp):
     if is_valid(url):
         soup = BeautifulSoup(resp.raw_response.content, 'html.parser')
         urls = parse_urls(url, soup)
-        file = open('testcontent.txt', 'w')
-        file.write(soup.getText())
-        file.close()
-
-        tokens = t.tokenize('testcontent.txt')
-        frequencies = t.compute_word_frequencies(tokens)
-        t.print_frequencies(frequencies)
+        # file = open('testcontent.txt', 'w')
+        # file.write(soup.getText())
+        # file.close()
+        #
+        # tokens = t.tokenize('testcontent.txt')
+        # frequencies = t.compute_word_frequencies(tokens)
+        # t.print_frequencies(frequencies)
 
         valid_urls = get_valid_urls(urls)
-        print(f'{len(valid_urls)}/{len(urls)}')
+        print(valid_urls)
         #invalid_urls = set(urls)-set(valid_urls)
         #print(invalid_urls)
-        #return valid_urls
+        return valid_urls
 
     return list()
 
@@ -46,8 +46,9 @@ def get_valid_urls(urls):
     # checks if urls are valid
     valid_urls = []
     for url in urls:
-        if _is_valid_authority(url) and is_valid(url):
+        if (_is_valid_authority(url)) and (is_valid(url)) and (url not in TOTAL_URLS):
             valid_urls.append(url)
+            TOTAL_URLS.add(url)
 
     return valid_urls
 
