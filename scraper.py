@@ -1,13 +1,15 @@
 import re
+from collections import Counter
 import tokenizer as t
 from urllib.parse import urlparse
 from bs4 import BeautifulSoup
 
-# tuple of possible domains we're allowed to crawl
-VALID_DOMAINS = ("ics.uci.edu", "cs.uci.edu", "informatics.uci.edu", "stat.uci.edu")
-
 # set of all unqiue URLs identified, might need to change to a dictionary to get urls from each page
 TOTAL_URLS = set()
+
+AUTHORITY_COUNT = {}
+
+PAGE_COUNT = {}
 
 
 def scraper(url, resp):
@@ -18,7 +20,8 @@ def scraper(url, resp):
 def extract_next_links(url, resp):
     # Implementation required. url: the URL that was used to get the page resp.url: the actual url of the page
     # resp.status: the status code returned by the server. 200 is OK, you got the page. Other numbers mean that there
-    # was some kind of problem. resp.error: when status is not 200, you can check the error here, if needed.
+    # was some kind of problem.
+    # resp.error: when status is not 200, you can check the error here, if needed.
     # resp.raw_response: this is where the page actually is. More specifically, the raw_response has two parts:
     # resp.raw_response.url: the url, again resp.raw_response.content: the content of the page! Return a list with
     # the hyperlinks (as strings) scrapped from resp.raw_response.content
@@ -33,37 +36,57 @@ def extract_next_links(url, resp):
         # frequencies = t.compute_word_frequencies(tokens)
         # t.print_frequencies(frequencies)
 
-        valid_urls = get_valid_urls(urls) #move this up so it doesn't crawl
+        valid_urls = []
+
+        for url in urls:
+            if is_valid(url):
+                valid_urls.append(url)
+
         print(valid_urls)
         return valid_urls
+    else:
+        print("NOT CRAWLED")
 
     return list()
 
 
-def get_valid_urls(urls):
+def is_duplicate_url(url):
     # checks if urls are valid
-    valid_urls = []
-    for url in urls:
-        if (_is_valid_authority(url)) and (is_valid(url)) and (url not in TOTAL_URLS):
-            valid_urls.append(url)
-            TOTAL_URLS.add(url)
-
-    return valid_urls
+    if url not in TOTAL_URLS:
+        return False
+    else:
+        return True
 
 
-def _is_valid_authority(url):
-    # checks if url authority matches one of the allowed authorities
+def is_recursive_url(url, threshold=3):
+    # Detects recursive traps where path segments are repeated too many times.
     parsed = urlparse(url)
-    netloc = parsed.netloc.lower()  # Normalize to lowercase for consistency
+    path_segments = parsed.path.strip("/").split("/")  # Extract path segments
 
-    # Construct regex dynamically for allowed netlocs
-    pattern = r"(" + r"|".join(re.escape(n) for n in VALID_DOMAINS) + r")$"
+    # Count occurrences of each segment
+    segment_counts = Counter(path_segments)
 
-    return re.search(pattern, netloc) is not None
+    # If any segment appears more than the threshold, it's likely a trap
+    for segment, count in segment_counts.items():
+        if count >= threshold:
+            return True  # Recursive pattern detected
+
+    return False  # No recursive pattern
+
+
+def is_authority_pass_threshold(authority, threshold=500):
+    if authority in AUTHORITY_COUNT:
+        if AUTHORITY_COUNT[authority] >= threshold: # over the threshold
+            return True
+        else:
+            AUTHORITY_COUNT[authority] += 1 # add one to occurrences
+            return False
+    else:
+        AUTHORITY_COUNT[authority] = 1 # first appearence
+        return False
 
 
 def parse_urls(url, soup):
-
     urls = []
     for link in soup.find_all('a', href=True):
         href = link.get('href')
@@ -89,6 +112,16 @@ def is_valid(url):
         # Check if URL is one of VALID_DOMAINS
         if not any(parsed.netloc.endswith(domain) for domain in VALID_DOMAINS):
             return False
+        # Check if URL has already been crawled
+        if is_duplicate_url(url):
+            return False
+        # Check if the path of the URL is recursive
+        if is_recursive_url(url):
+            return False
+
+        if is_authority_pass_threshold(parsed.netloc):
+            return False
+
         # Get rid of unwanted file types
         return not re.match(
             r".*\.(css|js|bmp|gif|jpe?g|ico"
