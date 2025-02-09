@@ -3,6 +3,7 @@ from collections import Counter
 import tokenizer as t
 from urllib.parse import urlparse
 from urllib.parse import urljoin
+from urllib.robotparser import RobotFileParser
 from bs4 import BeautifulSoup
 
 VALID_DOMAINS = ("ics.uci.edu", "cs.uci.edu", "informatics.uci.edu", "stat.uci.edu")
@@ -56,6 +57,21 @@ def is_duplicate_url(url):
         return False
     else:
         return True
+
+
+def is_crawling_allowed(url, user_agent="*"):
+    # * for all agents
+    parsed = urlparse(url)
+    robots_url = f"{parsed.scheme}://{parsed.netloc}/robots.txt" # get url of robots.txt
+
+    rp = RobotFileParser()
+
+    try:
+        rp.set_url(robots_url)
+        rp.read()  # Read and parse robots.txt
+        return rp.can_fetch(user_agent, url)  # Check if crawling is allowed
+    except:
+        return True  # Assume allowed if there is no robots.txt
 
 
 def is_recursive_url(url, threshold=3):
@@ -125,6 +141,10 @@ def is_valid(url):
             return False
         # Check if the path of the URL is recursive
         if is_recursive_url(url):
+            return False
+
+        if not is_crawling_allowed(url):
+            print('robots not allowing crawl', url)
             return False
 
         # if is_authority_pass_threshold(parsed.netloc):
