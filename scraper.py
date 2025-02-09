@@ -2,14 +2,17 @@ import re
 from collections import Counter
 import tokenizer as t
 from urllib.parse import urlparse
+from urllib.parse import urljoin
 from bs4 import BeautifulSoup
+
+VALID_DOMAINS = ("ics.uci.edu", "cs.uci.edu", "informatics.uci.edu", "stat.uci.edu")
 
 # set of all unqiue URLs identified, might need to change to a dictionary to get urls from each page
 TOTAL_URLS = set()
 
-AUTHORITY_COUNT = {}
+# AUTHORITY_COUNT = {}
 
-PAGE_COUNT = {}
+SUB_DOMAIN_COUNT = {}
 
 
 def scraper(url, resp):
@@ -26,8 +29,8 @@ def extract_next_links(url, resp):
     # resp.raw_response.url: the url, again resp.raw_response.content: the content of the page! Return a list with
     # the hyperlinks (as strings) scrapped from resp.raw_response.content
 
-    if is_valid(url) and not resp.error:  # make sure the URL is valid and is not responding with error
-        soup = BeautifulSoup(resp.raw_response.content, 'html.parser')
+    if is_valid(url) and not resp.status != 200:  # make sure the URL is valid and is not responding with error
+        soup = BeautifulSoup(resp.raw_response.content, 'lxml')
         urls = parse_urls(url, soup)
         # file = open('testcontent.txt', 'w')
         # file.write(soup.getText())
@@ -39,13 +42,9 @@ def extract_next_links(url, resp):
         valid_urls = []
 
         for url in urls:
-            if is_valid(url):
-                valid_urls.append(url)
+            valid_urls.append(url)
 
-        print(valid_urls)
         return valid_urls
-    else:
-        print("NOT CRAWLED")
 
     return list()
 
@@ -53,6 +52,7 @@ def extract_next_links(url, resp):
 def is_duplicate_url(url):
     # checks if urls are valid
     if url not in TOTAL_URLS:
+        TOTAL_URLS.add(url)
         return False
     else:
         return True
@@ -74,27 +74,37 @@ def is_recursive_url(url, threshold=3):
     return False  # No recursive pattern
 
 
-def is_authority_pass_threshold(authority, threshold=500):
-    if authority in AUTHORITY_COUNT:
-        if AUTHORITY_COUNT[authority] >= threshold: # over the threshold
-            return True
-        else:
-            AUTHORITY_COUNT[authority] += 1 # add one to occurrences
-            return False
-    else:
-        AUTHORITY_COUNT[authority] = 1 # first appearence
-        return False
+# def is_authority_pass_threshold(authority, threshold=500):
+#     if authority in AUTHORITY_COUNT:
+#         if AUTHORITY_COUNT[authority] >= threshold: # over the threshold
+#             print('count = ', AUTHORITY_COUNT[authority])
+#             return True
+#         else:
+#             AUTHORITY_COUNT[authority] += 1 # add one to occurrences
+#             return False
+#     else:
+#         AUTHORITY_COUNT[authority] = 1 # first appearence
+#         return False
 
 
-def parse_urls(url, soup):
+def parse_urls(base_url, soup):
     urls = []
-    for link in soup.find_all('a', href=True):
+    for link in soup.find_all("a"):
         href = link.get('href')
-        if href.startswith('http'):  # Check if it's an absolute URL
-            urls.append(href)
-        elif href.startswith('/'):  # Handle relative URLs
-            urls.append(url + href)
+        if href:
+            full_url = urljoin(base_url, href)  # Convert to absolute URL
+            defragmented_url = full_url.split('#')[0]
+            urls.append(defragmented_url)
     return urls
+
+
+def _is_valid_authority(url):
+    # checks if url authority matches one of the allowed authorities
+    parsed = urlparse(url)
+    netloc = parsed.netloc.lower()  # Normalize to lowercase for consistency
+    # Construct regex dynamically for allowed netlocs
+    pattern = r"(" + r"|".join(re.escape(n) for n in VALID_DOMAINS) + r")$"
+    return re.search(pattern, netloc) is not None
 
 
 def is_valid(url):
@@ -102,15 +112,13 @@ def is_valid(url):
     # If you decide to crawl it, return True; otherwise return False.
     # There are already some conditions that return False.
 
-    VALID_DOMAINS = {".ics.uci.edu", ".cs.uci.edu", ".informatics.uci.edu", ".stat.uci.edu"}
-
     try:
         parsed = urlparse(url)
         # Check if scheme is https or http
         if parsed.scheme not in set(["http", "https"]):
             return False
         # Check if URL is one of VALID_DOMAINS
-        if not any(parsed.netloc.endswith(domain) for domain in VALID_DOMAINS):
+        if not _is_valid_authority(url):
             return False
         # Check if URL has already been crawled
         if is_duplicate_url(url):
@@ -119,8 +127,9 @@ def is_valid(url):
         if is_recursive_url(url):
             return False
 
-        if is_authority_pass_threshold(parsed.netloc):
-            return False
+        # if is_authority_pass_threshold(parsed.netloc):
+        #     print('too much authority', url)
+        #     return False
 
         # Get rid of unwanted file types
         return not re.match(
