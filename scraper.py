@@ -5,6 +5,7 @@ from urllib.parse import urlparse
 from urllib.parse import urljoin
 from bs4 import BeautifulSoup
 from urllib.robotparser import RobotFileParser
+import hashlib
 
 VALID_DOMAINS = ("ics.uci.edu", "cs.uci.edu", "informatics.uci.edu", "stat.uci.edu")
 
@@ -44,6 +45,12 @@ def extract_next_links(url, resp):
 
     soup = BeautifulSoup(resp.raw_response.content, 'html.parser')
     text = soup.get_text()
+
+    if is_same_content(text):
+        print(f'SKIPPED {url}')
+        return list()
+
+
 
     urls = parse_urls(resp.raw_response.url, soup)
 
@@ -156,6 +163,8 @@ def _is_valid_authority(url):
     return re.search(pattern, netloc) is not None
 
 
+
+
 def is_valid(url):
     # Decide whether to crawl this url or not.
     # If you decide to crawl it, return True; otherwise return False.
@@ -200,6 +209,81 @@ def is_valid(url):
     except TypeError:
         print("TypeError for ", parsed)
         raise
+
+
+###########################################################
+#                 Similarity and Trap Detection
+###########################################################
+
+def extract_features(text):
+    # Tokenize the text and get word frequencies
+    words = tokenize(text)
+    frequencies = compute_word_frequencies(words)
+
+    # Create a feature for each word based on its frequency
+    features = []
+    for word, freq in frequencies.items():
+        # Repeat the word based on its frequency
+        features.extend([word] * freq)
+
+    return features
+
+def get_simhash(input_text):
+    # Split the input into a set of features
+    features = extract_features(input_text)
+
+    # Generate a hash for each feature
+    hashes = [hashlib.sha1(feature.encode('utf-8')).hexdigest() for feature in features]
+
+    # Combine the feature hashes to produce the final simhash
+    concatenated_hash = ''.join(hashes)
+    simhash = hashlib.sha1(concatenated_hash.encode('utf-8')).hexdigest()
+
+    return simhash
+
+
+def compare_simhashes(simhash1, simhash2):
+    # Convert simhashes to integers
+    int_simhash1 = int(simhash1, 16)
+    int_simhash2 = int(simhash2, 16)
+
+    # Calculate the distance between the simhashes
+    distance = bin(int_simhash1 ^ int_simhash2).count('1')
+
+    return distance
+
+
+previous_url_hash = None
+
+def is_same_content(text):
+
+    global previous_url_hash
+    current_hash = get_simhash(text)
+
+    if previous_url_hash is None:
+        previous_url_hash = current_hash
+        return False
+
+    distance = compare_simhashes(previous_url_hash, current_hash)
+
+    previous_url_hash = current_hash
+
+    if distance < 5:
+        return True
+    return False
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
