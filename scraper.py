@@ -5,13 +5,15 @@ from urllib.parse import urlparse
 from urllib.parse import urljoin
 from urllib.robotparser import RobotFileParser
 from bs4 import BeautifulSoup
+import hashlib
+
 
 VALID_DOMAINS = ("ics.uci.edu", "cs.uci.edu", "informatics.uci.edu", "stat.uci.edu")
 
 # set of all unqiue URLs identified, might need to change to a dictionary to get urls from each page
 TOTAL_URLS = set()
 
-# AUTHORITY_COUNT = {}
+NORMALIZED_URL_COUNT = {}
 
 SUB_DOMAIN_COUNT = {}
 
@@ -29,7 +31,7 @@ def extract_next_links(url, resp):
     # resp.raw_response: this is where the page actually is. More specifically, the raw_response has two parts:
     # resp.raw_response.url: the url, again resp.raw_response.content: the content of the page! Return a list with
     # the hyperlinks (as strings) scrapped from resp.raw_response.content
-
+    print(len(TOTAL_URLS))
     if is_valid(url) and not resp.status != 200:  # make sure the URL is valid and is not responding with error
         soup = BeautifulSoup(resp.raw_response.content, 'lxml')
         urls = parse_urls(url, soup)
@@ -89,20 +91,6 @@ def is_recursive_url(url, threshold=3):
 
     return False  # No recursive pattern
 
-
-# def is_authority_pass_threshold(authority, threshold=500):
-#     if authority in AUTHORITY_COUNT:
-#         if AUTHORITY_COUNT[authority] >= threshold: # over the threshold
-#             print('count = ', AUTHORITY_COUNT[authority])
-#             return True
-#         else:
-#             AUTHORITY_COUNT[authority] += 1 # add one to occurrences
-#             return False
-#     else:
-#         AUTHORITY_COUNT[authority] = 1 # first appearence
-#         return False
-
-
 def parse_urls(base_url, soup):
     urls = []
     for link in soup.find_all("a"):
@@ -114,6 +102,27 @@ def parse_urls(base_url, soup):
     return urls
 
 
+def is_calendar_trap(url):
+    parsed = urlparse(url)
+    path_segments = parsed.path.strip("/").split("/")
+    calendar_pattern_found = any('calendar' in segment.lower() for segment in path_segments)
+
+    date_patterns = [
+        r"\d{4}-\d{2}-\d{2}",  # YYYY-MM-DD
+        r"\d{2}/\d{2}/\d{4}",  # MM/DD/YYYY
+        r"\d{4}/\d{2}/\d{2}",  # YYYY/MM/DD
+        r"\d{4}-\d{2}",  # YYYY-MM
+    ]
+
+    for pattern in date_patterns:
+        if re.search(pattern, url):
+            return True
+
+    if calendar_pattern_found:
+        return True
+
+    return False
+
 def _is_valid_authority(url):
     # checks if url authority matches one of the allowed authorities
     parsed = urlparse(url)
@@ -121,6 +130,76 @@ def _is_valid_authority(url):
     # Construct regex dynamically for allowed netlocs
     pattern = r"(" + r"|".join(re.escape(n) for n in VALID_DOMAINS) + r")$"
     return re.search(pattern, netloc) is not None
+
+
+def normalize_url(url):
+    """
+    Normalizes the URL by:
+    - Removing the last path segment
+    - Stripping query parameters and fragments
+    Example:
+      Input:  https://isg.ics.uci.edu/events/tag/talk/2019-11?view=full#top
+      Output: https://isg.ics.uci.edu/events/tag/talk
+    """
+    parsed = urlparse(url)
+
+    # Split the path into segments and remove the last one if there are multiple segments
+    path_segments = parsed.path.strip("/").split("/")
+
+    if len(path_segments) > 2:
+        path_segments.pop()  # Remove the last segment
+
+    # Reconstruct the cleaned URL (excluding query and fragment)
+    cleaned_path = "/" + "/".join(path_segments)
+    normalized_url = f"{parsed.scheme}://{parsed.netloc}{cleaned_path}"
+
+    return normalized_url
+
+
+def is_url_over_threshold(url, threshold=100):
+    n_url = normalize_url(url)
+    if n_url in NORMALIZED_URL_COUNT:
+        if NORMALIZED_URL_COUNT[n_url] >= threshold: # over the threshold
+            print('count = ', NORMALIZED_URL_COUNT[n_url])
+            print('url = ', n_url)
+            return True
+        else:
+            NORMALIZED_URL_COUNT[n_url] += 1 # add one to occurrences
+            return False
+    else:
+        NORMALIZED_URL_COUNT[n_url] = 1 # first appearence
+        return False
+
+
+def simhash(input):
+    # Split the input into a set of features
+    features = extract_features(input)
+
+    # Generate a hash for each feature
+    hashes = [hashlib.sha1(feature).hexdigest() for feature in features]
+
+    # Combine the feature hashes to produce the final simhash
+    concatenated_hash = ''.join(hashes)
+    simhash = hashlib.sha1(concatenated_hash).hexdigest()
+
+    return simhash
+
+
+def compare_simhashes(simhash1, simhash2):
+    # Convert simhashes to integers
+    int_simhash1 = int(simhash1, 16)
+    int_simhash2 = int(simhash2, 16)
+
+    # Calculate the distance between the simhashes
+    distance = bin(int_simhash1 ^ int_simhash2).count('1')
+
+    return distance
+
+
+def is_same_content():
+    if distance < 5:
+        return True
+    return False
 
 
 def is_valid(url):
@@ -139,6 +218,7 @@ def is_valid(url):
         # Check if URL has already been crawled
         if is_duplicate_url(url):
             return False
+
         # Check if the path of the URL is recursive
         if is_recursive_url(url):
             return False
@@ -147,9 +227,13 @@ def is_valid(url):
             print('robots not allowing crawl', url)
             return False
 
-        # if is_authority_pass_threshold(parsed.netloc):
-        #     print('too much authority', url)
-        #     return False
+        if is_url_over_threshold(url):
+            print('url over threshold')
+            return False
+
+        if is_calendar_trap(url):
+            print('calendar trap:', url)
+            return False
 
         # Get rid of unwanted file types
         return not re.match(
