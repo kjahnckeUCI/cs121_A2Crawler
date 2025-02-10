@@ -1,5 +1,6 @@
 import os
 import shelve
+import threading
 
 from threading import Thread, RLock
 from queue import Queue, Empty
@@ -12,6 +13,7 @@ class Frontier(object):
         self.logger = get_logger("FRONTIER")
         self.config = config
         self.to_be_downloaded = list()
+        self.lock = threading.RLock()
         
         if not os.path.exists(self.config.save_file) and not restart:
             # Save file does not exist, but request to load save.
@@ -56,17 +58,23 @@ class Frontier(object):
     def add_url(self, url):
         url = normalize(url)
         urlhash = get_urlhash(url)
-        if urlhash not in self.save:
-            self.save[urlhash] = (url, False)
-            self.save.sync()
-            self.to_be_downloaded.append(url)
-    
+
+        with self.lock:
+            with shelve.open(self.config.save_file) as db:
+                # Check if already in DB
+                if urlhash not in db:
+                    db[urlhash] = (url, False)
+                    # Add to the local memory list
+                    self.to_be_downloaded.append(url)
+
     def mark_url_complete(self, url):
         urlhash = get_urlhash(url)
-        if urlhash not in self.save:
-            # This should not happen.
-            self.logger.error(
-                f"Completed url {url}, but have not seen it before.")
 
-        self.save[urlhash] = (url, True)
-        self.save.sync()
+        with self.lock:
+            with shelve.open(self.config.save_file) as db:
+                if urlhash not in db:
+                    # This should not happen, but let's log or handle it
+                    self.logger.error(f"Completed url {url}, but have not seen it before.")
+                else:
+                    # Mark as complete
+                    db[urlhash] = (url, True)
