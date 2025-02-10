@@ -228,9 +228,10 @@ def is_valid(url):
         raise
 
 
-###########################################################
+##############################################################################################################
 #                 Similarity and Trap Detection
-###########################################################
+# Simhash citation: https://spotintelligence.com/2023/01/02/simhash/#Example_of_SimHash_Calculation
+##############################################################################################################
 
 def extract_features(tokens):
     # Get word frequencies from tokens
