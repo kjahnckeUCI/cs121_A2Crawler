@@ -1,25 +1,50 @@
 import re
 from collections import Counter
-import tokenizer as t
 from urllib.parse import urlparse
 from urllib.parse import urljoin
 from bs4 import BeautifulSoup
 from urllib.robotparser import RobotFileParser
+import nltk
+from nltk.corpus import stopwords
 import hashlib
 
+
+############################################################################
+#                               GLOBALS
+############################################################################
 VALID_DOMAINS = ("ics.uci.edu", "cs.uci.edu", "informatics.uci.edu", "stat.uci.edu")
+TOTAL_URLS = set() # set of all unqiue URLs identified, might need to change to a dictionary to get urls from each page
 
-# set of all unqiue URLs identified, might need to change to a dictionary to get urls from each page
-TOTAL_URLS = set()
+ICS_SUB_DOMAIN = dict()
 
-AUTHORITY_COUNT = dict()
+URL_LENGTHS = dict() # url : num_tokens
+TOKEN_COUNTS = dict() #
 
-PAGE_COUNT = dict()
+STOP_WORDS = {
+    "a", "about", "above", "after", "again", "against", "all", "am", "an", "and", "any", "are", "aren't", "as", "at",
+    "be", "because", "been", "before", "being", "below", "between", "both", "but", "by", "can't", "cannot", "could",
+    "couldn't", "did", "didn't", "do", "does", "doesn't", "doing", "don't", "down", "during", "each", "few", "for",
+    "from", "further", "had", "hadn't", "has", "hasn't", "have", "haven't", "having", "he", "he'd", "he'll", "he's",
+    "her", "here", "here's", "hers", "herself", "him", "himself", "his", "how", "how's", "i", "i'd", "i'll", "i'm",
+    "i've", "if", "in", "into", "is", "isn't", "it", "it's", "its", "itself", "let's", "me", "more", "most", "mustn't",
+    "my", "myself", "no", "nor", "not", "of", "off", "on", "once", "only", "or", "other", "ought", "our", "ours",
+    "ourselves", "out", "over", "own", "same", "shan't", "she", "she'd", "she'll", "she's", "should", "shouldn't",
+    "so", "some", "such", "than", "that", "that's", "the", "their", "theirs", "them", "themselves", "then", "there",
+    "there's", "these", "they", "they'd", "they'll", "they're", "they've", "this", "those", "through", "to", "too",
+    "under", "until", "up", "very", "was", "wasn't", "we", "we'd", "we'll", "we're", "we've", "were", "weren't",
+    "what", "what's", "when", "when's", "where", "where's", "which", "while", "who", "who's", "whom", "why", "why's",
+    "with", "won't", "would", "wouldn't", "you", "you'd", "you'll", "you're", "you've", "your", "yours", "yourself",
+    "yourselves"
+}
+nltk.download('stopwords')
+stop_words = stopwords.words('english')
 
-previousListOfStrings = []
+ALL_STOP_WORDS = set(stop_words).union(STOP_WORDS)
 
+############################################################################
+#                         SCRAPER MAIN FUNCTIONS
+############################################################################
 
-COUNT = 0
 
 def scraper(url, resp):
     links = extract_next_links(url, resp)
@@ -46,34 +71,52 @@ def extract_next_links(url, resp):
     soup = BeautifulSoup(resp.raw_response.content, 'html.parser')
     text = soup.get_text()
 
-    if is_same_content(text):
+    tokens = tokenize(text) # get all the tokens from this URL
+
+    is_sub_domain(url)  # count subdomain for report, above same content check
+
+    if is_same_content(tokens): # pass it to the simhash checkers
         print(f'SKIPPED {url}')
         return list()
 
-
+    process_url_text(url, tokens) # process URL tokens for report
 
     urls = parse_urls(resp.raw_response.url, soup)
+    return urls
 
 
-
-    valid_urls = []
-    for url in urls:
-        valid_urls.append(url)
-    return valid_urls
+def parse_urls(base_url, soup):
+    urls = []
+    for link in soup.find_all("a"):
+        href = link.get('href')
+        if href:
+            full_url = urljoin(base_url, href)  # Convert to absolute URL
+            defragmented_url = full_url.split('#')[0]
+            urls.append(defragmented_url)
+    return urls
+############################################################################
+#                       URL CHECKS
+############################################################################
 
 
 def should_extract(url, resp):
-
-    if not is_valid(url):
-        return False
     if resp.error:
         return False
     if not is_crawling_allowed(url):
         return False
     if not check_file_size(url, resp):
         return False
+    if is_calendar_trap(url):
+        return False
+    if not is_valid_authority(url):
+        return False
+    if not is_valid(url):
+        return False
+    if is_duplicate_url(url):
+        return False
 
     return True
+
 
 def check_file_size(url, resp):
 
@@ -85,7 +128,6 @@ def check_file_size(url, resp):
         print(f'{url}: SIZE INVALID: {len(resp.raw_response.content)} bytes')
         return False
     else:
-        #print(f'{url}: SIZE VALID: {len(resp.raw_response.content)} bytes')
         return True
 
 
@@ -104,9 +146,20 @@ def is_crawling_allowed(url, user_agent="*"):
         return True  # Assume allowed if there is no robots.txt
 
 
+def is_calendar_trap(url):
+    parsed = urlparse(url)
+    path_segments = parsed.path.strip("/").split("/")
+    calendar_pattern_found = any('calendar' in segment.lower() for segment in path_segments)
+    event_pattern_found = any('event' in segment.lower() for segment in path_segments)
+
+    if calendar_pattern_found or event_pattern_found:
+        return True
+
+    return False
+
 
 def is_duplicate_url(url):
-    # checks if urls are valid
+    # checks if urls are unique
     if url not in TOTAL_URLS:
         TOTAL_URLS.add(url)
         return False
@@ -114,55 +167,32 @@ def is_duplicate_url(url):
         return True
 
 
-def is_recursive_url(url, threshold=3):
-    # Detects recursive traps where path segments are repeated too many times.
-    parsed = urlparse(url)
-    path_segments = parsed.path.strip("/").split("/")  # Extract path segments
-
-    # Count occurrences of each segment
-    segment_counts = Counter(path_segments)
-
-    # If any segment appears more than the threshold, it's likely a trap
-    for segment, count in segment_counts.items():
-        if count >= threshold:
-            return True  # Recursive pattern detected
-
-    return False  # No recursive pattern
-
-
-# def is_authority_pass_threshold(authority, threshold=500):
-#     if authority in AUTHORITY_COUNT:
-#         if AUTHORITY_COUNT[authority] >= threshold: # over the threshold
-#             print('count = ', AUTHORITY_COUNT[authority])
-#             return True
-#         else:
-#             AUTHORITY_COUNT[authority] += 1 # add one to occurrences
-#             return False
-#     else:
-#         AUTHORITY_COUNT[authority] = 1 # first appearence
-#         return False
+# def is_recursive_url(url, threshold=3):
+#     # Detects recursive traps where path segments are repeated too many times.
+#     parsed = urlparse(url)
+#     path_segments = parsed.path.strip("/").split("/")  # Extract path segments
+#
+#     # Count occurrences of each segment
+#     segment_counts = Counter(path_segments)
+#
+#     # If any segment appears more than the threshold, it's likely a trap
+#     for segment, count in segment_counts.items():
+#         if count >= threshold:
+#             return True  # Recursive pattern detected
+#
+#     return False  # No recursive pattern
 
 
-def parse_urls(base_url, soup):
-    urls = []
-    for link in soup.find_all("a"):
-        href = link.get('href')
-        if href:
-            full_url = urljoin(base_url, href)  # Convert to absolute URL
-            defragmented_url = full_url.split('#')[0]
-            urls.append(defragmented_url)
-    return urls
-
-
-def _is_valid_authority(url):
+def is_valid_authority(url):
     # checks if url authority matches one of the allowed authorities
     parsed = urlparse(url)
+
     netloc = parsed.netloc.lower()  # Normalize to lowercase for consistency
+
     # Construct regex dynamically for allowed netlocs
     pattern = r"(" + r"|".join(re.escape(n) for n in VALID_DOMAINS) + r")$"
+
     return re.search(pattern, netloc) is not None
-
-
 
 
 def is_valid(url):
@@ -170,30 +200,17 @@ def is_valid(url):
     # If you decide to crawl it, return True; otherwise return False.
     # There are already some conditions that return False.
 
-    VALID_DOMAINS = {".ics.uci.edu", ".cs.uci.edu", ".informatics.uci.edu", ".stat.uci.edu"}
-
     try:
         parsed = urlparse(url)
         # Check if scheme is https or http
         if parsed.scheme not in set(["http", "https"]):
-            #print('not in scheme', url)
             return False
-        # Check if URL is one of VALID_DOMAINS
-        if not _is_valid_authority(url):
-            #print('not in domain', url)
-            return False
-        # Check if URL has already been crawled
-        if is_duplicate_url(url):
-            #print('duplicate', url)
-            return False
-        # Check if the path of the URL is recursive
-        if is_recursive_url(url):
-            #print('recursive', url)
-            return False
-        #
-        # if is_authority_pass_threshold(parsed.netloc):
-        #     print('too much authority', url)
+
+        # # Check if the path of the URL is recursive
+        # if is_recursive_url(url):
+        #     #print('recursive', url)
         #     return False
+
 
         # Get rid of unwanted file types
         return not re.match(
@@ -215,10 +232,9 @@ def is_valid(url):
 #                 Similarity and Trap Detection
 ###########################################################
 
-def extract_features(text):
-    # Tokenize the text and get word frequencies
-    words = tokenize(text)
-    frequencies = compute_word_frequencies(words)
+def extract_features(tokens):
+    # Get word frequencies from tokens
+    frequencies = compute_word_frequencies(tokens)
 
     # Create a feature for each word based on its frequency
     features = []
@@ -255,10 +271,10 @@ def compare_simhashes(simhash1, simhash2):
 
 previous_url_hash = None
 
-def is_same_content(text):
+def is_same_content(tokens):
 
     global previous_url_hash
-    current_hash = get_simhash(text)
+    current_hash = get_simhash(tokens)
 
     if previous_url_hash is None:
         previous_url_hash = current_hash
@@ -268,41 +284,19 @@ def is_same_content(text):
 
     previous_url_hash = current_hash
 
+    print('previous hash: ', previous_url_hash, "current_hash: ", current_hash, "distance: ", distance)
     if distance < 5:
         return True
     return False
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 ############################################################################
 #                            TOKENIZATION
 ############################################################################
 
-URL_LENGTH = dict()
-TOKEN_COUNTS = dict()
-
-def process_url_text(url, text):
-
-    tokens = tokenize(text)
+def process_url_text(url, tokens):
+    global url_lengths
     _update_token_frequencies(tokens)
-    URL_LENGTH[url] = len(tokens)
+    url_lengths[url] = len(tokens)
 
 def tokenize(text):
 
@@ -333,16 +327,50 @@ def compute_word_frequencies(token_list):
 
     return frequency_dict
 
+############################################################################
+#                            REPORT GENERATION
+############################################################################
+def is_sub_domain(url):
+    parsed = urlparse(url)
+    netloc = parsed.netloc.lower()
+    if netloc.endswith("ics.uci.edu"):
+        if netloc in ICS_SUB_DOMAIN:
+            ICS_SUB_DOMAIN[netloc] = 1
+        else:
+            ICS_SUB_DOMAIN[netloc] += 1
 
 
+def get_top_50_tokens():
+    sorted_token_map = dict(sorted(TOKEN_COUNTS.items()))
+    sorted_token_map = dict(sorted(sorted_token_map.items(), key=lambda item: item[1], reverse=True))
+    filtered_tokens = {token: count for token, count in sorted_token_map.items() if token not in ALL_STOP_WORDS}
+    top_50_tokens = dict(list(filtered_tokens.items())[:50])
+    return top_50_tokens
 
 
+def longest_page():
+
+    url_dict = list(sorted(URL_LENGTHS.items(), key=lambda item: (-item[1], item[0])))
+
+    return url_dict[0]
 
 
+def print_crawler_report():
+    file = open('results.txt', 'w')
+    file.write(f'\t\t\t\t\tCrawler Report\t\t\t\t\t\n')
+    file.write("Members ID Numbers: 47403760, 35811463, 44045256, 57082516\n\n")
+    file.write(f'\t\t\tTotal Number of Unique Pages: {len(TOTAL_URLS)}\n\n')
 
+    longest_url = longest_page()
+    file.write(f'\t\t\tThis url: {longest_url[0]} has the most words with: {longest_url[1]} words\n\n')
 
+    top_50_tokens = get_top_50_tokens()
+    for token, count in top_50_tokens.items():
+        file.write(f'\t\t\t{token} -> {count}\n')
+    file.write('\n')
 
-
-
-
-
+    file.write(f'\t\t\tTotal Number of Unique ICS Subdomains: {len(ICS_SUB_DOMAIN)}\n\n')
+    output_lines = [f"\t\t\thttps://{url}, {count}" for url, count in ICS_SUB_DOMAIN]
+    file.write('\n'.join(output_lines))
+    file.write(f'\t\t\t\t\tEnd Crawler Report\t\t\t\t\t\n')
+    file.close()
