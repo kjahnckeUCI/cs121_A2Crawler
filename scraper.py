@@ -1,5 +1,4 @@
 import re
-from collections import Counter
 from urllib.parse import urlparse
 from urllib.parse import urljoin
 from bs4 import BeautifulSoup
@@ -19,6 +18,8 @@ ICS_SUB_DOMAIN = dict()
 
 URL_LENGTHS = dict() # url : num_tokens
 TOKEN_COUNTS = dict() #
+
+THRESHOLD_COUNT = dict()
 
 STOP_WORDS = {
     "a", "about", "above", "after", "again", "against", "all", "am", "an", "and", "any", "are", "aren't", "as", "at",
@@ -59,21 +60,22 @@ def extract_next_links(url, resp):
     # resp.raw_response: this is where the page actually is. More specifically, the raw_response has two parts:
     # resp.raw_response.url: the url, again resp.raw_response.content: the content of the page! Return a list with
     # the hyperlinks (as strings) scrapped from resp.raw_response.content
-    global COUNT
-    print(COUNT)
-    COUNT += 1
 
+    # url = urljoin(resp.url, url)
+
+    defragmented_url = url.split('#')[0]
+
+    if resp.status != 404 and resp.status != 403: # don't add to count if the URL is 404
+        TOTAL_URLS.add(defragmented_url) # since it's a set, no need to check if url already in or not
+        is_sub_domain(url)  # count subdomain for report, above same content check
 
     if not should_extract(url, resp):  # make sure the URL is valid and is not responding with error
         return list()
 
-
-    soup = BeautifulSoup(resp.raw_response.content, 'html.parser')
+    soup = BeautifulSoup(resp.raw_response.content, 'lxml')
     text = soup.get_text()
 
     tokens = tokenize(text) # get all the tokens from this URL
-
-    is_sub_domain(url)  # count subdomain for report, above same content check
 
     if is_same_content(tokens): # pass it to the simhash checkers
         print(f'SKIPPED {url}')
@@ -82,8 +84,12 @@ def extract_next_links(url, resp):
     process_url_text(url, tokens) # process URL tokens for report
 
     urls = parse_urls(resp.raw_response.url, soup)
-    return urls
 
+    valid_urls = []
+    for url in urls:
+        if is_valid_authority(url): # don't even place URLs with invalid authority inside of frontier
+            valid_urls.append(url)
+    return valid_urls
 
 def parse_urls(base_url, soup):
     urls = []
@@ -98,34 +104,58 @@ def parse_urls(base_url, soup):
 #                       URL CHECKS
 ############################################################################
 
-
 def should_extract(url, resp):
     if resp.error:
+        print('resp error')
         return False
+    # if resp.status != 200:
+    #     print('status error')
+    #     return False
     if not is_crawling_allowed(url):
-        return False
-    if not check_file_size(url, resp):
-        return False
-    if is_calendar_trap(url):
-        return False
-    if not is_valid_authority(url):
-        return False
-    if not is_valid(url):
+        print('robots')
         return False
     if is_duplicate_url(url):
         return False
-
+    if not check_file_size(resp):
+        print('file size')
+        return False
+    if is_trap(url):
+        print('trap')
+        return False
+    if not is_valid_authority(url):
+        print('authority')
+        return False
+    if not is_valid(url):
+        print('not valid')
+        return False
+    if is_over_threshold(url):
+        print('over threshold')
+        return False
+    if not is_encodeable(resp):
+        print('not encodeable')
+        return False
     return True
 
 
-def check_file_size(url, resp):
+def is_over_threshold(url, threshold=100):
+    dequeried_url = url.split('?')[0]
+    if (dequeried_url in THRESHOLD_COUNT):
+        THRESHOLD_COUNT[dequeried_url] += 1
+        if (THRESHOLD_COUNT[dequeried_url] >= threshold):
+            return True
+        else:
+            return False
+    else:
+        THRESHOLD_COUNT[dequeried_url] = 1
+        return False
 
-    minimum_size = 500 #500 bytes
-    maximum_size = 35 * 1024 * 1024 #35MB
 
+def check_file_size(resp):
+
+    minimum_size = 500 # 500 bytes
+    maximum_size = 35 * 1024 * 1024 # 35MB
 
     if not (minimum_size < len(resp.raw_response.content) < maximum_size):
-        print(f'{url}: SIZE INVALID: {len(resp.raw_response.content)} bytes')
         return False
     else:
         return True
@@ -146,53 +176,47 @@ def is_crawling_allowed(url, user_agent="*"):
         return True  # Assume allowed if there is no robots.txt
 
 
-def is_calendar_trap(url):
+def is_trap(url):
     parsed = urlparse(url)
     path_segments = parsed.path.strip("/").split("/")
     calendar_pattern_found = any('calendar' in segment.lower() for segment in path_segments)
     event_pattern_found = any('event' in segment.lower() for segment in path_segments)
+    doku_pattern_found = any('doku.php' in segment.lower() for segment in path_segments)
 
-    if calendar_pattern_found or event_pattern_found:
+
+    if calendar_pattern_found or event_pattern_found or doku_pattern_found:
         return True
 
     return False
 
 
+def is_encodeable(resp):
+    # make sure that the content can be encoded with utf-8, resolve errors like:
+    # encoding error : input conversion failed due to input error, bytes 0x81 0x48 0x56 0x4B
+    content_type = resp.raw_response.headers.get("Content-Type", "")
+    if not re.match(r"text/.*", content_type) or not "utf-8" in content_type.lower():
+        print('not encodeable:', content_type)
+        return False
+    return True
+
+
 def is_duplicate_url(url):
     # checks if urls are unique
     if url not in TOTAL_URLS:
-        TOTAL_URLS.add(url)
         return False
     else:
         return True
 
 
-# def is_recursive_url(url, threshold=3):
-#     # Detects recursive traps where path segments are repeated too many times.
-#     parsed = urlparse(url)
-#     path_segments = parsed.path.strip("/").split("/")  # Extract path segments
-#
-#     # Count occurrences of each segment
-#     segment_counts = Counter(path_segments)
-#
-#     # If any segment appears more than the threshold, it's likely a trap
-#     for segment, count in segment_counts.items():
-#         if count >= threshold:
-#             return True  # Recursive pattern detected
-#
-#     return False  # No recursive pattern
-
-
 def is_valid_authority(url):
-    # checks if url authority matches one of the allowed authorities
+    # Parse URL and normalize
     parsed = urlparse(url)
+    netloc = parsed.netloc.lower()
 
-    netloc = parsed.netloc.lower()  # Normalize to lowercase for consistency
+    # Ensure exact match for domain or valid subdomain
+    pattern = r"^(?:\w+\.)*(" + "|".join(re.escape(n) for n in VALID_DOMAINS) + r")$"
 
-    # Construct regex dynamically for allowed netlocs
-    pattern = r"(" + r"|".join(re.escape(n) for n in VALID_DOMAINS) + r")$"
-
-    return re.search(pattern, netloc) is not None
+    return re.match(pattern, netloc) is not None
 
 
 def is_valid(url):
@@ -230,7 +254,10 @@ def is_valid(url):
 
 ##############################################################################################################
 #                 Similarity and Trap Detection
-# Simhash citation: https://spotintelligence.com/2023/01/02/simhash/#Example_of_SimHash_Calculation
+# Simhash citations:
+# https://spotintelligence.com/2023/01/02/simhash/#Example_of_SimHash_Calculation
+# https://stackoverflow.com/questions/456302/how-to-determine-if-two-web-pages-are-the-same
+# https://algonotes.readthedocs.io/en/latest/Simhash.html
 ##############################################################################################################
 
 def extract_features(tokens):
@@ -245,49 +272,55 @@ def extract_features(tokens):
 
     return features
 
-def get_simhash(input_text):
-    # Split the input into a set of features
-    features = extract_features(input_text)
+def simhash(features, bit_length=64):
+    """ Computes a SimHash with a given bit length """
+    v = [0] * bit_length
 
-    # Generate a hash for each feature
-    hashes = [hashlib.sha1(feature.encode('utf-8')).hexdigest() for feature in features]
+    for feature in features:
+        h = int(hashlib.sha1(feature.encode('utf-8')).hexdigest(), 16)  # Convert feature to hash
+        for i in range(bit_length):
+            if h & (1 << i):
+                v[i] += 1
+            else:
+                v[i] -= 1
 
-    # Combine the feature hashes to produce the final simhash
-    concatenated_hash = ''.join(hashes)
-    simhash = hashlib.sha1(concatenated_hash.encode('utf-8')).hexdigest()
-
-    return simhash
-
-
-def compare_simhashes(simhash1, simhash2):
-    # Convert simhashes to integers
-    int_simhash1 = int(simhash1, 16)
-    int_simhash2 = int(simhash2, 16)
-
-    # Calculate the distance between the simhashes
-    distance = bin(int_simhash1 ^ int_simhash2).count('1')
-
-    return distance
+    # Convert vector to binary hash
+    return sum(1 << i for i in range(bit_length) if v[i] > 0)
 
 
-previous_url_hash = None
+def hamming_distance(hash1, hash2):
+    """ Compute Hamming distance between two hashes """
+    x = (hash1 ^ hash2) & ((1 << 64) - 1)
+    ans = 0
+    while x:
+        ans += 1
+        x &= x - 1
+    return ans
 
-def is_same_content(tokens):
+# Set to store past simhashes
+previous_hashes = set()
 
-    global previous_url_hash
-    current_hash = get_simhash(tokens)
+def is_same_content(tokens, threshold=3):
+    """ Checks if the content is similar to previous pages """
+    global previous_hashes
+    current_hash = simhash(extract_features(tokens))
 
-    if previous_url_hash is None:
-        previous_url_hash = current_hash
+    if not previous_hashes:
+        previous_hashes.add(current_hash)
         return False
 
-    distance = compare_simhashes(previous_url_hash, current_hash)
+    smallest_dist = float('inf')
 
-    previous_url_hash = current_hash
+    for old_hash in previous_hashes:
+        dist = hamming_distance(old_hash, current_hash)
+        smallest_dist = min(smallest_dist, dist)
 
-    print('previous hash: ', previous_url_hash, "current_hash: ", current_hash, "distance: ", distance)
-    if distance < 5:
-        return True
+    print(f'DISTANCE: {smallest_dist}')  # Debugging info
+
+    if smallest_dist <= threshold:
+        return True  # Similar content detected
+
+    previous_hashes.add(current_hash)
     return False
 
 ############################################################################
@@ -295,16 +328,15 @@ def is_same_content(tokens):
 ############################################################################
 
 def process_url_text(url, tokens):
-    global url_lengths
+    global URL_LENGTHS
     _update_token_frequencies(tokens)
-    url_lengths[url] = len(tokens)
+    URL_LENGTHS[url] = len(tokens)
 
 def tokenize(text):
 
     tokens = []
 
-    for line in text:
-        tokens += re.findall(r"[a-zA-Z0-9']+", line.lower())
+    tokens += re.findall(r"[a-zA-Z0-9']+", text.lower())
 
     return tokens
 
@@ -331,14 +363,21 @@ def compute_word_frequencies(token_list):
 ############################################################################
 #                            REPORT GENERATION
 ############################################################################
+
 def is_sub_domain(url):
     parsed = urlparse(url)
     netloc = parsed.netloc.lower()
-    if netloc.endswith("ics.uci.edu"):
-        if netloc in ICS_SUB_DOMAIN:
+
+    # Ensure it is either exactly "ics.uci.edu" or a subdomain (e.g., "vision.ics.uci.edu")
+    if netloc == "ics.uci.edu" or netloc.endswith(".ics.uci.edu"):
+        if netloc not in ICS_SUB_DOMAIN:
             ICS_SUB_DOMAIN[netloc] = 1
         else:
             ICS_SUB_DOMAIN[netloc] += 1
+        return True  # It's a valid subdomain
+
+    return False  # Not a valid subdomain
+
 
 
 def get_top_50_tokens():
@@ -358,9 +397,9 @@ def longest_page():
 
 def print_crawler_report():
     file = open('results.txt', 'w')
-    file.write(f'\t\t\t\t\tCrawler Report\t\t\t\t\t\n')
+    file.write(f'\t\t\t\t\tCrawler Report: Simhash threshold = 3, Got rid of encode checker, and resp.status != 200\t\t\t\t\t\n')
     file.write("Members ID Numbers: 47403760, 35811463, 44045256, 57082516\n\n")
-    file.write(f'\t\t\tTotal Number of Unique Pages: {len(TOTAL_URLS)}\n\n')
+    file.write(f'\t\t\tTotal Number of Unique Pages that are not 404 or 403: {len(TOTAL_URLS)}\n\n')
 
     longest_url = longest_page()
     file.write(f'\t\t\tThis url: {longest_url[0]} has the most words with: {longest_url[1]} words\n\n')
@@ -371,7 +410,7 @@ def print_crawler_report():
     file.write('\n')
 
     file.write(f'\t\t\tTotal Number of Unique ICS Subdomains: {len(ICS_SUB_DOMAIN)}\n\n')
-    output_lines = [f"\t\t\thttps://{url}, {count}" for url, count in ICS_SUB_DOMAIN]
+    output_lines = [f"\t\t\thttps://{url}, {count}" for url, count in ICS_SUB_DOMAIN.items()]
     file.write('\n'.join(output_lines))
-    file.write(f'\t\t\t\t\tEnd Crawler Report\t\t\t\t\t\n')
+    file.write(f'\n\t\t\t\t\tEnd Crawler Report\t\t\t\t\t\n')
     file.close()
