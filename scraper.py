@@ -1,5 +1,4 @@
 import re
-from collections import Counter
 from urllib.parse import urlparse
 from urllib.parse import urljoin
 from bs4 import BeautifulSoup
@@ -8,17 +7,19 @@ import nltk
 from nltk.corpus import stopwords
 import hashlib
 
+
 ############################################################################
 #                               GLOBALS
 ############################################################################
-
 VALID_DOMAINS = ("ics.uci.edu", "cs.uci.edu", "informatics.uci.edu", "stat.uci.edu")
-TOTAL_URLS = set() # set of all unique URLs identified, might need to change to a dictionary to get urls from each page
+TOTAL_URLS = set() # set of all unqiue URLs identified, might need to change to a dictionary to get urls from each page
 
 ICS_SUB_DOMAIN = dict()
 
 URL_LENGTHS = dict() # url : num_tokens
 TOKEN_COUNTS = dict() #
+
+THRESHOLD_COUNT = dict()
 
 STOP_WORDS = {
     "a", "about", "above", "after", "again", "against", "all", "am", "an", "and", "any", "are", "aren't", "as", "at",
@@ -41,42 +42,55 @@ stop_words = stopwords.words('english')
 
 ALL_STOP_WORDS = set(stop_words).union(STOP_WORDS)
 
-
 ############################################################################
 #                         SCRAPER MAIN FUNCTIONS
 ############################################################################
+
 
 def scraper(url, resp):
     links = extract_next_links(url, resp)
     return [link for link in links if is_valid(link)]
 
-COUNT = 0 # for debugging
-def extract_next_links(url, resp):
 
-    global COUNT
-    print(COUNT)
-    COUNT += 1
+def extract_next_links(url, resp):
+    # Implementation required. url: the URL that was used to get the page resp.url: the actual url of the page
+    # resp.status: the status code returned by the server. 200 is OK, you got the page. Other numbers mean that there
+    # was some kind of problem.
+    # resp.error: when status is not 200, you can check the error here, if needed.
+    # resp.raw_response: this is where the page actually is. More specifically, the raw_response has two parts:
+    # resp.raw_response.url: the url, again resp.raw_response.content: the content of the page! Return a list with
+    # the hyperlinks (as strings) scrapped from resp.raw_response.content
+
+    # url = urljoin(resp.url, url)
+
+    defragmented_url = url.split('#')[0]
 
     if not should_extract(url, resp):  # make sure the URL is valid and is not responding with error
+        print("SKIPPED")
         return list()
 
-    soup = BeautifulSoup(resp.raw_response.content, 'html.parser')
-    text = soup.get_text()
-    tokens = tokenize(text)
+    if resp.status != 404 and resp.status != 403: # don't add to count if the URL is 404
+        TOTAL_URLS.add(defragmented_url) # since it's a set, no need to check if url already in or not
+        is_sub_domain(url)  # count subdomain for report, above same content check
 
-    is_sub_domain(url)
-    if is_same_content(tokens):
+    soup = BeautifulSoup(resp.raw_response.content, 'lxml')
+    text = soup.get_text()
+
+    tokens = tokenize(text) # get all the tokens from this URL
+
+    if is_same_content(tokens): # pass it to the simhash checkers
         print(f'SKIPPED {url}')
         return list()
-    process_url_text(url, tokens)
+
+    process_url_text(url, tokens) # process URL tokens for report
 
     urls = parse_urls(resp.raw_response.url, soup)
 
     valid_urls = []
     for url in urls:
-        valid_urls.append(url)
+        if is_valid_authority(url): # don't even place URLs with invalid authority inside of frontier
+            valid_urls.append(url)
     return valid_urls
-
 
 def parse_urls(base_url, soup):
     urls = []
@@ -87,41 +101,64 @@ def parse_urls(base_url, soup):
             defragmented_url = full_url.split('#')[0]
             urls.append(defragmented_url)
     return urls
-
 ############################################################################
 #                       URL CHECKS
 ############################################################################
 
 def should_extract(url, resp):
-
-
     if resp.error:
+        print('resp error')
         return False
+    # if resp.status != 200:
+    #     print('status error')
+    #     return False
     if not is_crawling_allowed(url):
-        return False
-    if not check_file_size(url, resp):
-        return False
-    if not _is_valid_authority(url):
-        return False
-    if not is_valid(url):
+        print('robots')
         return False
     if is_duplicate_url(url):
-        # print('duplicate', url)
         return False
-
+    if not check_file_size(resp):
+        print('file size')
+        return False
+    if is_trap(url):
+        print('trap')
+        return False
+    if not is_valid_authority(url):
+        print('authority')
+        return False
+    if not is_valid(url):
+        print('not valid')
+        return False
+    if is_over_threshold(url):
+        print('over threshold')
+        return False
+    if not is_encodeable(resp):
+        print('not encodeable')
+        return False
     return True
 
-def check_file_size(url, resp):
 
-    minimum_size = 500 #500 bytes
-    maximum_size = 35 * 1024 * 1024 #35MB
+def is_over_threshold(url, threshold=100):
+    dequeried_url = url.split('?')[0]
+    if (dequeried_url in THRESHOLD_COUNT):
+        THRESHOLD_COUNT[dequeried_url] += 1
+        if (THRESHOLD_COUNT[dequeried_url] >= threshold):
+            return True
+        else:
+            return False
+    else:
+        THRESHOLD_COUNT[dequeried_url] = 1
+        return False
 
+
+def check_file_size(resp):
+
+    minimum_size = 500 # 500 bytes
+    maximum_size = 35 * 1024 * 1024 # 35MB
 
     if not (minimum_size < len(resp.raw_response.content) < maximum_size):
-        print(f'{url}: SIZE INVALID: {len(resp.raw_response.content)} bytes')
         return False
     else:
-        #print(f'{url}: SIZE VALID: {len(resp.raw_response.content)} bytes')
         return True
 
 
@@ -139,37 +176,48 @@ def is_crawling_allowed(url, user_agent="*"):
     except:
         return True  # Assume allowed if there is no robots.txt
 
+
+def is_trap(url):
+    parsed = urlparse(url)
+    path_segments = parsed.path.strip("/").split("/")
+    calendar_pattern_found = any('calendar' in segment.lower() for segment in path_segments)
+    event_pattern_found = any('event' in segment.lower() for segment in path_segments)
+    doku_pattern_found = any('doku.php' in segment.lower() for segment in path_segments)
+
+
+    if calendar_pattern_found or event_pattern_found or doku_pattern_found:
+        return True
+
+    return False
+
+
+def is_encodeable(resp):
+    # make sure that the content can be encoded with utf-8, resolve errors like:
+    # encoding error : input conversion failed due to input error, bytes 0x81 0x48 0x56 0x4B
+    content_type = resp.raw_response.headers.get("Content-Type", "")
+    if not re.match(r"text/.*", content_type) or not "utf-8" in content_type.lower():
+        print('not encodeable:', content_type)
+        return False
+    return True
+
+
 def is_duplicate_url(url):
-    # checks if urls are valid
+    # checks if urls are unique
     if url not in TOTAL_URLS:
-        TOTAL_URLS.add(url)
         return False
     else:
         return True
 
-#
-# def is_recursive_url(url, threshold=3):
-#     # Detects recursive traps where path segments are repeated too many times.
-#     parsed = urlparse(url)
-#     path_segments = parsed.path.strip("/").split("/")  # Extract path segments
-#
-#     # Count occurrences of each segment
-#     segment_counts = Counter(path_segments)
-#
-#     # If any segment appears more than the threshold, it's likely a trap
-#     for segment, count in segment_counts.items():
-#         if count >= threshold:
-#             return True  # Recursive pattern detected
-#
-#     return False  # No recursive pattern
 
-def _is_valid_authority(url):
-    # checks if url authority matches one of the allowed authorities
+def is_valid_authority(url):
+    # Parse URL and normalize
     parsed = urlparse(url)
-    netloc = parsed.netloc.lower()  # Normalize to lowercase for consistency
-    # Construct regex dynamically for allowed netlocs
-    pattern = r"(" + r"|".join(re.escape(n) for n in VALID_DOMAINS) + r")$"
-    return re.search(pattern, netloc) is not None
+    netloc = parsed.netloc.lower()
+
+    # Ensure exact match for domain or valid subdomain
+    pattern = r"^(?:\w+\.)*(" + "|".join(re.escape(n) for n in VALID_DOMAINS) + r")$"
+
+    return re.match(pattern, netloc) is not None
 
 
 def is_valid(url):
@@ -181,18 +229,13 @@ def is_valid(url):
         parsed = urlparse(url)
         # Check if scheme is https or http
         if parsed.scheme not in set(["http", "https"]):
-            #print('not in scheme', url)
             return False
-        # Check if URL is one of VALID_DOMAINS
 
         # # Check if the path of the URL is recursive
         # if is_recursive_url(url):
         #     #print('recursive', url)
         #     return False
-        #
-        # if is_authority_pass_threshold(parsed.netloc):
-        #     print('too much authority', url)
-        #     return False
+
 
         # Get rid of unwanted file types
         return not re.match(
@@ -210,23 +253,13 @@ def is_valid(url):
         raise
 
 
-############################################################################
+##############################################################################################################
 #                 Similarity and Trap Detection
-############################################################################
-
-
-
-def is_calendar_trap(url):
-    parsed = urlparse(url)
-    path_segments = parsed.path.strip("/").split("/")
-    calendar_pattern_found = any('calendar' in segment.lower() for segment in path_segments)
-    event_pattern_found = any('event' in segment.lower() for segment in path_segments)
-
-    if calendar_pattern_found or event_pattern_found:
-        return True
-
-    return False
-
+# Simhash citations:
+# https://spotintelligence.com/2023/01/02/simhash/#Example_of_SimHash_Calculation
+# https://stackoverflow.com/questions/456302/how-to-determine-if-two-web-pages-are-the-same
+# https://algonotes.readthedocs.io/en/latest/Simhash.html
+##############################################################################################################
 
 def extract_features(tokens):
     # Get word frequencies from tokens
@@ -240,7 +273,7 @@ def extract_features(tokens):
 
     return features
 
-def simhash(features, bit_length=128):
+def simhash(features, bit_length=64):
     """ Computes a SimHash with a given bit length """
     v = [0] * bit_length
 
@@ -258,12 +291,18 @@ def simhash(features, bit_length=128):
 
 def hamming_distance(hash1, hash2):
     """ Compute Hamming distance between two hashes """
-    return bin(int(hash1) ^ int(hash2)).count('1')
+    x = (hash1 ^ hash2) & ((1 << 64) - 1)
+    ans = 0
+    while x:
+        ans += 1
+        x &= x - 1
+    return ans
 
 # Set to store past simhashes
 previous_hashes = set()
 
-def is_same_content(tokens, threshold=5):
+
+def is_same_content(tokens, threshold=3):
     """ Checks if the content is similar to previous pages """
     global previous_hashes
     current_hash = simhash(extract_features(tokens))
@@ -280,14 +319,11 @@ def is_same_content(tokens, threshold=5):
 
     print(f'DISTANCE: {smallest_dist}')  # Debugging info
 
-    if smallest_dist < threshold:
+    if smallest_dist <= threshold:
         return True  # Similar content detected
 
     previous_hashes.add(current_hash)
     return False
-
-
-
 
 ############################################################################
 #                            TOKENIZATION
@@ -302,8 +338,7 @@ def tokenize(text):
 
     tokens = []
 
-    for line in text:
-        tokens += re.findall(r"[a-zA-Z0-9']+", line.lower())
+    tokens += re.findall(r"[a-zA-Z0-9']+", text.lower())
 
     return tokens
 
@@ -334,11 +369,18 @@ def compute_word_frequencies(token_list):
 def is_sub_domain(url):
     parsed = urlparse(url)
     netloc = parsed.netloc.lower()
-    if netloc.endswith("ics.uci.edu"):
+
+    # Ensure it is either exactly "ics.uci.edu" or a subdomain (e.g., "vision.ics.uci.edu")
+    if netloc == "ics.uci.edu" or netloc.endswith(".ics.uci.edu"):
         if netloc not in ICS_SUB_DOMAIN:
             ICS_SUB_DOMAIN[netloc] = 1
         else:
             ICS_SUB_DOMAIN[netloc] += 1
+        return True  # It's a valid subdomain
+
+    return False  # Not a valid subdomain
+
+
 
 def get_top_50_tokens():
     sorted_token_map = dict(sorted(TOKEN_COUNTS.items()))
@@ -346,6 +388,7 @@ def get_top_50_tokens():
     filtered_tokens = {token: count for token, count in sorted_token_map.items() if token not in ALL_STOP_WORDS}
     top_50_tokens = dict(list(filtered_tokens.items())[:50])
     return top_50_tokens
+
 
 def longest_page():
 
@@ -356,10 +399,9 @@ def longest_page():
 
 def print_crawler_report():
     file = open('results.txt', 'w')
-    file.write(f'\t\t\t\t\tCrawler Report\t\t\t\t\t\n')
+    file.write(f'\t\t\t\t\tCrawler Report: Simhash threshold = 3, Got rid of encode checker, and resp.status != 200\t\t\t\t\t\n')
     file.write("Members ID Numbers: 47403760, 35811463, 44045256, 57082516\n\n")
-    #file.write(f'\t\t\tTotal Number of Unique Pages: {totalPageCounter} with new counter\n\n')
-    file.write(f'\t\t\tTotal Number of Unique Pages: {len(TOTAL_URLS)}\n\n')
+    file.write(f'\t\t\tTotal Number of Unique Pages that are not 404 or 403: {len(TOTAL_URLS)}\n\n')
 
     longest_url = longest_page()
     file.write(f'\t\t\tThis url: {longest_url[0]} has the most words with: {longest_url[1]} words\n\n')
@@ -370,18 +412,7 @@ def print_crawler_report():
     file.write('\n')
 
     file.write(f'\t\t\tTotal Number of Unique ICS Subdomains: {len(ICS_SUB_DOMAIN)}\n\n')
-    output_lines = [f"\t\t\thttps://{url}, {count}" for url, count in ICS_SUB_DOMAIN]
+    output_lines = [f"\t\t\thttps://{url}, {count}" for url, count in ICS_SUB_DOMAIN.items()]
     file.write('\n'.join(output_lines))
-    file.write(f'\t\t\t\t\tEnd Crawler Report\t\t\t\t\t\n')
+    file.write(f'\n\t\t\t\t\tEnd Crawler Report\t\t\t\t\t\n')
     file.close()
-
-
-
-
-
-
-
-
-
-
-
