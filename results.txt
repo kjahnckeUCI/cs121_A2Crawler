@@ -1,5 +1,7 @@
-					Crawler Report					
-Members ID Numbers: 47403760, 35811463, 44045256, 57082516
+Crawler Report
 
-			Total Number of Unique Pages: 0
+Members ID Numbers: 47403760, 35811463, 44045256, 57082516
+Members Names: Peihan Cui, Keanu Jahncke, Angelina Chau, Jorge Hernan Malagon Velasquez
+
+Total Number of Unique and valid Pages: 0
 

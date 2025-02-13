@@ -12,6 +12,7 @@ import hashlib
 #                               GLOBALS
 ############################################################################
 VALID_DOMAINS = ("ics.uci.edu", "cs.uci.edu", "informatics.uci.edu", "stat.uci.edu")
+TRAP_PATTERNS = {'event', 'events','calendar'}
 TOTAL_URLS = set() # set of all unqiue URLs identified, might need to change to a dictionary to get urls from each page
 
 ICS_SUB_DOMAIN = dict()
@@ -180,15 +181,17 @@ def is_crawling_allowed(url, user_agent="*"):
 def is_trap(url):
     parsed = urlparse(url)
     path_segments = parsed.path.strip("/").split("/")
-    calendar_pattern_found = any('calendar' in segment.lower() for segment in path_segments)
-    event_pattern_found = any('event' in segment.lower() for segment in path_segments)
-    doku_pattern_found = any('doku.php' in segment.lower() for segment in path_segments)
 
-
-    if calendar_pattern_found or event_pattern_found or doku_pattern_found:
+    # Check path segments for exact matches
+    for segment in path_segments:
+        if segment.lower() in TRAP_PATTERNS:
+            return True
+    
+    if 'doku.php' in url.lower():
         return True
 
     return False
+
 
 
 def is_encodeable(resp):
@@ -215,7 +218,7 @@ def is_valid_authority(url):
     netloc = parsed.netloc.lower()
 
     # Ensure exact match for domain or valid subdomain
-    pattern = r"^(?:\w+\.)*(" + "|".join(re.escape(n) for n in VALID_DOMAINS) + r")$"
+    pattern = r"^(?:[\w-]+\.)*(" + "|".join(re.escape(domain) for domain in VALID_DOMAINS) + r")$"
 
     return re.match(pattern, netloc) is not None
 
