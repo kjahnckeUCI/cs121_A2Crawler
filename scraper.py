@@ -61,8 +61,6 @@ def extract_next_links(url, resp):
     # resp.raw_response.url: the url, again resp.raw_response.content: the content of the page! Return a list with
     # the hyperlinks (as strings) scrapped from resp.raw_response.content
 
-    # url = urljoin(resp.url, url)
-
     defragmented_url = url.split('#')[0]
 
     if not should_extract(url, resp):  # make sure the URL is valid and is not responding with error
@@ -108,9 +106,6 @@ def should_extract(url, resp):
     if resp.error:
         print('resp error')
         return False
-    # if resp.status != 200:
-    #     print('status error')
-    #     return False
     if not is_crawling_allowed(url):
         print('robots')
         return False
@@ -134,7 +129,7 @@ def should_extract(url, resp):
     if not is_encodeable(resp):
         print('not encodeable')
         return False
-    if resp.status != 404 and resp.status != 403:  # don't add to count if the URL is 404
+    if resp.status == 404 and resp.status == 403:  # don't add to count if the URL is 404
         return False
     return True
 
