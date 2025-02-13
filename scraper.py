@@ -69,26 +69,25 @@ def extract_next_links(url, resp):
         print("SKIPPED")
         return list()
 
-    if resp.status != 404 and resp.status != 403: # don't add to count if the URL is 404
-        TOTAL_URLS.add(defragmented_url) # since it's a set, no need to check if url already in or not
-        is_sub_domain(url)  # count subdomain for report, above same content check
+    TOTAL_URLS.add(defragmented_url)  # since it's a set, no need to check if url already in or not
+    is_sub_domain(url)  # count subdomain for report, above same content check
 
     soup = BeautifulSoup(resp.raw_response.content, 'lxml')
     text = soup.get_text()
 
-    tokens = tokenize(text) # get all the tokens from this URL
+    tokens = tokenize(text)  # get all the tokens from this URL
 
-    if is_same_content(tokens): # pass it to the simhash checkers
+    if is_same_content(tokens):  # pass it to the simhash checkers
         print(f'SKIPPED {url}')
         return list()
 
-    process_url_text(url, tokens) # process URL tokens for report
+    process_url_text(url, tokens)  # process URL tokens for report
 
     urls = parse_urls(resp.raw_response.url, soup)
 
     valid_urls = []
     for url in urls:
-        if is_valid_authority(url): # don't even place URLs with invalid authority inside of frontier
+        if is_valid_authority(url):  # don't even place URLs with invalid authority inside of frontier
             valid_urls.append(url)
     return valid_urls
 
@@ -134,6 +133,8 @@ def should_extract(url, resp):
         return False
     if not is_encodeable(resp):
         print('not encodeable')
+        return False
+    if resp.status != 404 and resp.status != 403:  # don't add to count if the URL is 404
         return False
     return True
 
