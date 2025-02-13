@@ -399,20 +399,22 @@ def longest_page():
 
 def print_crawler_report():
     file = open('results.txt', 'w')
-    file.write(f'\t\t\t\t\tCrawler Report: Simhash threshold = 3, Got rid of encode checker, and resp.status != 200\t\t\t\t\t\n')
-    file.write("Members ID Numbers: 47403760, 35811463, 44045256, 57082516\n\n")
-    file.write(f'\t\t\tTotal Number of Unique Pages that are not 404 or 403: {len(TOTAL_URLS)}\n\n')
+    file.write(f'Crawler Report\n\n')
+    file.write("Members ID Numbers: 47403760, 35811463, 44045256, 57082516\n")
+    file.write("Members Names: Peihan Cui, Keanu Jahncke, Angelina Chau, Jorge Hernan Malagon Velasquez\n\n")
+    file.write(f'Total Number of Unique and valid Pages: {len(TOTAL_URLS)}\n\n')
 
     longest_url = longest_page()
-    file.write(f'\t\t\tThis url: {longest_url[0]} has the most words with: {longest_url[1]} words\n\n')
+    file.write(f'This url: {longest_url[0]} has the most words with: {longest_url[1]} words\n\n')
 
     top_50_tokens = get_top_50_tokens()
+    file.write(f'Top 50 tokens with count:\n')
     for token, count in top_50_tokens.items():
         file.write(f'\t\t\t{token} -> {count}\n')
     file.write('\n')
 
-    file.write(f'\t\t\tTotal Number of Unique ICS Subdomains: {len(ICS_SUB_DOMAIN)}\n\n')
-    output_lines = [f"\t\t\thttps://{url}, {count}" for url, count in ICS_SUB_DOMAIN.items()]
+    file.write(f'Total Number of Unique ICS Subdomains: {len(ICS_SUB_DOMAIN)}\n\n')
+    output_lines = [f"https://{url}, {count}" for url, count in ICS_SUB_DOMAIN.items()]
     file.write('\n'.join(output_lines))
-    file.write(f'\n\t\t\t\t\tEnd Crawler Report\t\t\t\t\t\n')
+    file.write(f'End of Crawler Report')
     file.close()
