@@ -12,7 +12,7 @@ import hashlib
 #                               GLOBALS
 ############################################################################
 VALID_DOMAINS = ("ics.uci.edu", "cs.uci.edu", "informatics.uci.edu", "stat.uci.edu")
-TOTAL_URLS = set() # set of all unqiue URLs identified, might need to change to a dictionary to get urls from each page
+TOTAL_URLS = set() # set of all unqiue URLs identified
 
 ICS_SUB_DOMAIN = dict()
 
@@ -64,7 +64,6 @@ def extract_next_links(url, resp):
     defragmented_url = url.split('#')[0]
 
     if not should_extract(url, resp):  # make sure the URL is valid and is not responding with error
-        print("SKIPPED")
         return list()
 
     TOTAL_URLS.add(defragmented_url)  # since it's a set, no need to check if url already in or not
@@ -76,12 +75,11 @@ def extract_next_links(url, resp):
     tokens = tokenize(text)  # get all the tokens from this URL
 
     if is_same_content(tokens):  # pass it to the simhash checkers
-        print(f'SKIPPED {url}')
         return list()
 
     process_url_text(url, tokens)  # process URL tokens for report
 
-    urls = parse_urls(resp.raw_response.url, soup)
+    urls = parse_urls(resp.raw_response.url, soup) # extract all urls from the page
 
     valid_urls = []
     for url in urls:
@@ -90,12 +88,22 @@ def extract_next_links(url, resp):
     return valid_urls
 
 def parse_urls(base_url, soup):
+    """
+    Parses and extracts absolute URLs from a BeautifulSoup object.
+
+    Args:
+        base_url (str): The base URL of the webpage.
+        soup (BeautifulSoup): Parsed HTML content.
+
+    Returns:
+        list: A list of absolute URLs found in the page.
+    """
     urls = []
     for link in soup.find_all("a"):
         href = link.get('href')
         if href:
             full_url = urljoin(base_url, href)  # Convert to absolute URL
-            defragmented_url = full_url.split('#')[0]
+            defragmented_url = full_url.split('#')[0] # get rid of the fragment
             urls.append(defragmented_url)
     return urls
 ############################################################################
@@ -103,6 +111,16 @@ def parse_urls(base_url, soup):
 ############################################################################
 
 def should_extract(url, resp):
+    """
+    Determines if a URL should be extracted based on various validity checks.
+
+    Args:
+        url (str): The URL being checked.
+        resp: The response object containing metadata.
+
+    Returns:
+        bool: True if the URL should be extracted, False otherwise.
+    """
     if resp.error:
         print('resp error')
         return False
@@ -123,32 +141,24 @@ def should_extract(url, resp):
     if not is_valid(url):
         print('not valid')
         return False
-    if is_over_threshold(url):
-        print('over threshold')
-        return False
     if not is_encodeable(resp):
         print('not encodeable')
         return False
-    if resp.status == 404 and resp.status == 403:  # don't add to count if the URL is 404
+    if resp.status == 404 or resp.status == 403:  # don't add to count if the URL is 404
         return False
     return True
 
 
-def is_over_threshold(url, threshold=100):
-    dequeried_url = url.split('?')[0]
-    if (dequeried_url in THRESHOLD_COUNT):
-        THRESHOLD_COUNT[dequeried_url] += 1
-        if (THRESHOLD_COUNT[dequeried_url] >= threshold):
-            return True
-        else:
-            return False
-    else:
-        THRESHOLD_COUNT[dequeried_url] = 1
-        return False
-
-
 def check_file_size(resp):
+    """
+    Checks if the response content size is within acceptable limits.
 
+    Args:
+        resp: The response object.
+
+    Returns:
+        bool: True if the content size is valid, False otherwise.
+    """
     minimum_size = 500 # 500 bytes
     maximum_size = 35 * 1024 * 1024 # 35MB
 
@@ -159,7 +169,16 @@ def check_file_size(resp):
 
 
 def is_crawling_allowed(url, user_agent="*"):
-    # * for all agents
+    """
+    Checks if crawling is permitted for the given URL based on robots.txt rules.
+
+    Args:
+        url (str): The URL to check.
+        user_agent (str): The user agent string (default is '*', for all agents).
+
+    Returns:
+        bool: True if crawling is allowed, False otherwise.
+    """
     parsed = urlparse(url)
     robots_url = f"{parsed.scheme}://{parsed.netloc}/robots.txt" # get url of robots.txt
 
@@ -174,6 +193,15 @@ def is_crawling_allowed(url, user_agent="*"):
 
 
 def is_trap(url):
+    """
+    Checks if the url path contains a segment that might be a trap
+
+    Args:
+        url (str): The URL to validate.
+
+    Returns:
+        bool: True if the URL has the keyword, False otherwise.
+    """
     parsed = urlparse(url)
     path_segments = parsed.path.strip("/").split("/")
     calendar_pattern_found = any('calendar' in segment.lower() for segment in path_segments)
@@ -188,17 +216,33 @@ def is_trap(url):
 
 
 def is_encodeable(resp):
-    # make sure that the content can be encoded with utf-8, resolve errors like:
-    # encoding error : input conversion failed due to input error, bytes 0x81 0x48 0x56 0x4B
+    """
+    Makes sure that the content can be encoded with utf-8, resolve errors like:
+    encoding error : input conversion failed due to input error, bytes 0x81 0x48 0x56 0x4B
+
+    Args:
+        resp: The response object.
+
+    Returns:
+        bool: True if the content is valid, False otherwise.
+    """
+
     content_type = resp.raw_response.headers.get("Content-Type", "")
     if not re.match(r"text/.*", content_type) or not "utf-8" in content_type.lower():
-        print('not encodeable:', content_type)
         return False
     return True
 
 
 def is_duplicate_url(url):
-    # checks if urls are unique
+    """
+    Checks if urls are unique
+
+    Args:
+        url (str): The URL to validate.
+
+    Returns:
+        bool: True if the URL is unique, False otherwise.
+    """
     if url not in TOTAL_URLS:
         return False
     else:
@@ -206,11 +250,18 @@ def is_duplicate_url(url):
 
 
 def is_valid_authority(url):
-    # Parse URL and normalize
+    """
+    Checks if url has a valid authority
+
+    Args:
+        url (str): The URL to validate.
+
+    Returns:
+        bool: True if the URL has a valid authority, False otherwise.
+    """
     parsed = urlparse(url)
     netloc = parsed.netloc.lower()
 
-    # Ensure exact match for domain or valid subdomain
     pattern = r"^(?:\w+\.)*(" + "|".join(re.escape(n) for n in VALID_DOMAINS) + r")$"
 
     return re.match(pattern, netloc) is not None
@@ -226,12 +277,6 @@ def is_valid(url):
         # Check if scheme is https or http
         if parsed.scheme not in set(["http", "https"]):
             return False
-
-        # # Check if the path of the URL is recursive
-        # if is_recursive_url(url):
-        #     #print('recursive', url)
-        #     return False
-
 
         # Get rid of unwanted file types
         return not re.match(
@@ -258,6 +303,15 @@ def is_valid(url):
 ##############################################################################################################
 
 def extract_features(tokens):
+    """
+    Gets the features or values for the tokens by frequency
+
+    Args:
+        tokens (list): A list of tokens.
+
+    Returns:
+        list: The list of featured tokens
+    """
     # Get word frequencies from tokens
     frequencies = compute_word_frequencies(tokens)
 
@@ -270,7 +324,16 @@ def extract_features(tokens):
     return features
 
 def simhash(features, bit_length=64):
-    """ Computes a SimHash with a given bit length """
+    """
+    Computes a SimHash value for a given set of features.
+
+    Args:
+        features (list): A list of feature tokens.
+        bit_length (int): The length of the hash in bits (default is 64).
+
+    Returns:
+        int: The computed SimHash value.
+    """
     v = [0] * bit_length
 
     for feature in features:
@@ -286,7 +349,16 @@ def simhash(features, bit_length=64):
 
 
 def hamming_distance(hash1, hash2):
-    """ Compute Hamming distance between two hashes """
+    """
+    Computes the Hamming distance between two SimHash values.
+
+    Args:
+        hash1 (int): First hash value.
+        hash2 (int): Second hash value.
+
+    Returns:
+        int: The Hamming distance between the two hashes.
+    """
     x = (hash1 ^ hash2) & ((1 << 64) - 1)
     ans = 0
     while x:
@@ -294,12 +366,21 @@ def hamming_distance(hash1, hash2):
         x &= x - 1
     return ans
 
-# Set to store past simhashes
+# Set to store all simhashes
 previous_hashes = set()
 
 
 def is_same_content(tokens, threshold=3):
-    """ Checks if the content is similar to previous pages """
+    """
+    Checks if the hashes are similar to previously seen pages.
+
+    Args:
+        tokens (list): A list of tokenized words from the content.
+        threshold (int, optional): The maximum Hamming distance allowed for content to be considered similar. Defaults to 3.
+
+    Returns:
+        bool: True if the content is similar to previous pages, False otherwise.
+    """
     global previous_hashes
     current_hash = simhash(extract_features(tokens))
 
@@ -326,12 +407,27 @@ def is_same_content(tokens, threshold=3):
 ############################################################################
 
 def process_url_text(url, tokens):
+    """
+    Updates the token frequency count and records the token length of the given URL.
+
+    Args:
+        url (str): The URL being processed.
+        tokens (list): A list of tokenized words from the URL content.
+    """
     global URL_LENGTHS
     _update_token_frequencies(tokens)
     URL_LENGTHS[url] = len(tokens)
 
 def tokenize(text):
+    """
+    Tokenizes the given text into words, preserving alphanumeric sequences and apostrophes.
 
+    Args:
+        text (str): The input text to tokenize.
+
+    Returns:
+        list: A list of tokens extracted from the text.
+    """
     tokens = []
 
     tokens += re.findall(r"[a-zA-Z0-9']+", text.lower())
@@ -339,7 +435,12 @@ def tokenize(text):
     return tokens
 
 def _update_token_frequencies(token_list):
+    """
+    Updates the global token frequency dictionary with counts of tokens in the provided list.
 
+    Args:
+        token_list (list): A list of tokens to update the frequency count.
+    """
     for token in token_list:
         if token not in TOKEN_COUNTS.keys():
             TOKEN_COUNTS[token] = 1
@@ -347,7 +448,15 @@ def _update_token_frequencies(token_list):
             TOKEN_COUNTS[token] += 1
 
 def compute_word_frequencies(token_list):
+    """
+    Computes the frequency of each unique token in the given list.
 
+    Args:
+        token_list (list): A list of tokens.
+
+    Returns:
+        dict: A dictionary mapping tokens to their respective frequencies.
+    """
     frequency_dict = dict()
 
     for token in token_list:
@@ -363,6 +472,15 @@ def compute_word_frequencies(token_list):
 ############################################################################
 
 def is_sub_domain(url):
+    """
+    Determines if a URL belongs to the ics.uci.edu subdomain and tracks occurrences.
+
+    Args:
+        url (str): The URL to check.
+
+    Returns:
+        bool: True if the URL is a subdomain of ics.uci.edu, False otherwise.
+    """
     parsed = urlparse(url)
     netloc = parsed.netloc.lower()
 
@@ -379,21 +497,36 @@ def is_sub_domain(url):
 
 
 def get_top_50_tokens():
-    sorted_token_map = dict(sorted(TOKEN_COUNTS.items()))
-    sorted_token_map = dict(sorted(sorted_token_map.items(), key=lambda item: item[1], reverse=True))
+    """
+    Retrieves the top 50 most frequent non-stopword tokens.
+
+    Returns:
+        dict: A dictionary of the top 50 tokens and their counts.
+    """
+    sorted_token_map = dict(sorted(TOKEN_COUNTS.items())) # sort by alphabetical first
+    sorted_token_map = dict(sorted(sorted_token_map.items(), key=lambda item: item[1], reverse=True)) # sort by frequency
     filtered_tokens = {token: count for token, count in sorted_token_map.items() if token not in ALL_STOP_WORDS}
     top_50_tokens = dict(list(filtered_tokens.items())[:50])
     return top_50_tokens
 
 
 def longest_page():
+    """
+    Finds the URL with the highest word count.
 
+    Returns:
+        tuple: A tuple containing the URL and the word count of the longest page.
+    """
     url_dict = list(sorted(URL_LENGTHS.items(), key=lambda item: (-item[1], item[0])))
 
     return url_dict[0]
 
 
 def print_crawler_report():
+    """
+    Generates a report summarizing the web crawling results, including page counts, top tokens, and subdomain data.
+    The report is saved in 'results.txt'.
+    """
     file = open('results.txt', 'w')
     file.write(f'Crawler Report\n\n')
     file.write("Members ID Numbers: 47403760, 35811463, 44045256, 57082516\n")
@@ -406,11 +539,11 @@ def print_crawler_report():
     top_50_tokens = get_top_50_tokens()
     file.write(f'Top 50 tokens with count:\n')
     for token, count in top_50_tokens.items():
-        file.write(f'\t\t\t{token} -> {count}\n')
+        file.write(f'{token} -> {count}\n')
     file.write('\n')
 
     file.write(f'Total Number of Unique ICS Subdomains: {len(ICS_SUB_DOMAIN)}\n\n')
     output_lines = [f"https://{url}, {count}" for url, count in ICS_SUB_DOMAIN.items()]
     file.write('\n'.join(output_lines))
-    file.write(f'End of Crawler Report')
+    file.write(f'\nEnd of Crawler Report')
     file.close()
